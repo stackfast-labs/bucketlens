@@ -1,0 +1,35 @@
+const state={prefix:'',items:[],view:'grid',config:{}};
+const $=sel=>document.querySelector(sel);
+const items=$('#items'), crumbs=$('#breadcrumbs'), toast=$('#toast'), dialog=$('#previewDialog'), preview=$('#previewBody');
+init().catch(err=>showToast(err.message||String(err)));
+async function init(){state.config=await api('/api/config');$('#title').textContent=state.config.title;bind();await load('')}
+function bind(){
+  $('#refresh').onclick=()=>load(state.prefix);$('#uploadOpen').onclick=()=>$('#fileInput').click();$('#chooseFiles').onclick=()=>$('#fileInput').click();$('#fileInput').onchange=e=>uploadFiles(e.target.files);
+  $('#gridView').onclick=()=>setView('grid');$('#listView').onclick=()=>setView('list');$('#closePreview').onclick=()=>dialog.close();
+  const dz=$('#dropzone');['dragenter','dragover'].forEach(ev=>dz.addEventListener(ev,e=>{e.preventDefault();dz.classList.add('drag')}));['dragleave','drop'].forEach(ev=>dz.addEventListener(ev,e=>{e.preventDefault();dz.classList.remove('drag')}));dz.addEventListener('drop',e=>uploadFiles(e.dataTransfer.files));
+}
+async function load(prefix){state.prefix=prefix||'';const data=await api(`/api/list?prefix=${encodeURIComponent(state.prefix)}`);state.items=[...data.folders,...data.files];renderCrumbs(data.breadcrumbs);renderItems();$('#folderMeta').textContent=`${data.folders.length} folders · ${data.files.length} files${state.prefix?' · '+state.prefix:''}`}
+function renderCrumbs(list){crumbs.innerHTML='';for(const c of list){const b=document.createElement('button');b.className='crumb';b.textContent=c.name;b.onclick=()=>load(c.prefix);crumbs.appendChild(b)}}
+function setView(v){state.view=v;items.classList.toggle('list',v==='list');$('#gridView').classList.toggle('active',v==='grid');$('#listView').classList.toggle('active',v==='list')}
+function renderItems(){items.innerHTML='';setView(state.view);if(!state.items.length){items.innerHTML='<div class="meta"><div class="name">This folder is empty</div><div class="sub">Drop files above to upload.</div></div>';return}for(const item of state.items)items.appendChild(card(item))}
+function card(item){const el=document.createElement('article');el.className='card';
+  const thumb=document.createElement('div');thumb.className='thumb';
+  if(item.type==='folder'){thumb.innerHTML='<div class="folderIcon">⌁</div>';el.onclick=e=>{if(e.target.tagName!=='BUTTON')load(item.prefix)}}
+  else if(item.thumbnail){const img=new Image();img.loading='lazy';img.src=item.thumbnail;img.alt='';img.onerror=()=>{thumb.innerHTML=`<div class="fileIcon">${icon(item.kind)}</div>`};thumb.appendChild(img);if(item.kind==='video'){const p=document.createElement('div');p.className='playBadge';p.textContent='▶';el.appendChild(p)}}
+  else thumb.innerHTML=`<div class="fileIcon">${icon(item.kind)}</div>`;
+  const meta=document.createElement('div');meta.className='meta';meta.innerHTML=`<div class="name">${esc(item.name)}</div><div class="sub">${item.type==='folder'?'Folder':`${fmtBytes(item.size)} · ${item.kind}`}</div>`;
+  const actions=document.createElement('div');actions.className='cardActions';
+  if(item.type==='folder'){actions.append(mini('Open',()=>load(item.prefix)));}
+  else{actions.append(mini('Expand',()=>openPreview(item)),mini('Copy URL',()=>copy(item.url)),mini('Copy Obsidian',()=>copy(item.markdown)),mini('Delete',()=>deleteItem(item),'danger'))}
+  el.append(thumb,meta,actions);return el}
+function mini(label,fn,cls=''){const b=document.createElement('button');b.className=`mini ${cls}`;b.textContent=label;b.onclick=e=>{e.stopPropagation();fn()};return b}
+async function openPreview(item){let media='';const signed=(await api(`/api/object-url?key=${encodeURIComponent(item.key)}`)).signedUrl;if(item.kind==='image')media=`<img src="${signed}" alt="${esc(item.name)}">`;else if(item.kind==='video')media=`<video src="${signed}" controls autoplay playsinline></video>`;else media=`<div class="fileIcon">${icon(item.kind)}</div>`;preview.innerHTML=`<div class="previewInner"><div class="previewMedia">${media}</div><div class="previewInfo"><div><div class="name">${esc(item.name)}</div><div class="sub">${esc(item.key)} · ${fmtBytes(item.size)}</div></div><div class="actions"><button class="btn secondary" data-copy-url>Copy URL</button><button class="btn primary" data-copy-md>Copy Obsidian</button></div></div></div>`;preview.querySelector('[data-copy-url]').onclick=()=>copy(item.url);preview.querySelector('[data-copy-md]').onclick=()=>copy(item.markdown);dialog.showModal()}
+async function deleteItem(item){if(!confirm(`Delete ${item.name} from R2?`))return;await api('/api/object',{method:'DELETE',headers:{'content-type':'application/json'},body:JSON.stringify({key:item.key})});showToast('Deleted');await load(state.prefix)}
+async function uploadFiles(files){files=[...files];if(!files.length)return;const fd=new FormData();for(const f of files)fd.append('files',f,f.name);const prog=document.createElement('div');prog.className='progress';prog.innerHTML='<div class="bar"></div>';$('#dropzone').appendChild(prog);await xhrUpload(`/api/upload?prefix=${encodeURIComponent(state.prefix)}`,fd,p=>prog.querySelector('.bar').style.width=p+'%');prog.remove();showToast(`Uploaded ${files.length} file${files.length===1?'':'s'}`);$('#fileInput').value='';await load(state.prefix)}
+function xhrUpload(url,body,onProgress){return new Promise((resolve,reject)=>{const x=new XMLHttpRequest();x.open('POST',url);x.upload.onprogress=e=>{if(e.lengthComputable)onProgress(Math.round(e.loaded/e.total*100))};x.onload=()=>x.status<300||x.status===207?resolve(JSON.parse(x.responseText||'{}')):reject(new Error(x.responseText||x.statusText));x.onerror=()=>reject(new Error('Upload failed'));x.send(body)})}
+async function api(url,opts){const r=await fetch(url,opts);if(!r.ok)throw new Error((await r.text())||r.statusText);return r.json()}
+async function copy(text){await navigator.clipboard.writeText(text||'');showToast('Copied')}
+function showToast(msg){toast.textContent=msg;toast.classList.add('show');clearTimeout(showToast.t);showToast.t=setTimeout(()=>toast.classList.remove('show'),1800)}
+function icon(kind){return({image:'◈',video:'▶',audio:'♪',doc:'□',file:'◇'})[kind]||'◇'}
+function fmtBytes(n){if(!n)return'0 B';const u=['B','KB','MB','GB','TB'];let i=0;while(n>=1024&&i<u.length-1){n/=1024;i++}return`${n.toFixed(n>=10||i===0?0:1)} ${u[i]}`}
+function esc(s){return String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}

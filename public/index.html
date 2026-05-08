@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>R2 Media Browser</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <div class="aurora"></div>
+  <main class="shell">
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">Cloudflare R2 media console</p>
+        <h1 id="title">Assets</h1>
+      </div>
+      <div class="actions">
+        <button id="refresh" class="btn ghost">Refresh</button>
+        <button id="uploadOpen" class="btn primary">Drop upload</button>
+      </div>
+    </header>
+
+    <section class="dropzone" id="dropzone">
+      <div class="dropGlow"></div>
+      <div class="dropIcon">⇪</div>
+      <div>
+        <h2>Drop big media files here</h2>
+        <p>Uploads into the current folder. Keeps names and generates public + Obsidian copy actions.</p>
+      </div>
+      <input id="fileInput" type="file" multiple />
+      <button class="btn secondary" id="chooseFiles">Choose files</button>
+    </section>
+
+    <nav id="breadcrumbs" class="crumbs"></nav>
+
+    <section class="panel">
+      <div class="panelHead">
+        <div>
+          <h2>Folder</h2>
+          <p id="folderMeta">Loading…</p>
+        </div>
+        <div class="viewToggle">
+          <button id="gridView" class="chip active">Grid</button>
+          <button id="listView" class="chip">List</button>
+        </div>
+      </div>
+      <div id="items" class="grid"></div>
+    </section>
+  </main>
+
+  <dialog id="previewDialog" class="previewDialog">
+    <button id="closePreview" class="close">×</button>
+    <div id="previewBody"></div>
+  </dialog>
+
+  <div id="toast" class="toast"></div>
+  <script src="/app.js"></script>
+</body>
+</html>
