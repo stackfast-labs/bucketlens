@@ -21,6 +21,7 @@ const PUBLIC_BASE_URL = stripSlash(process.env.PUBLIC_BASE_URL || '');
 const CACHE_DIR = process.env.CACHE_DIR || path.join(process.cwd(), '.cache');
 const MAX_UPLOAD_BYTES = Number(process.env.MAX_UPLOAD_BYTES || 20 * 1024 * 1024 * 1024);
 const APP_TOKEN = process.env.APP_TOKEN || '';
+const DEMO_MODE = String(process.env.DEMO_MODE || 'false') === 'true';
 
 const s3 = new S3Client({
   endpoint: process.env.S3_ENDPOINT,
@@ -44,12 +45,13 @@ app.use(express.static(path.join(process.cwd(), 'public'), { extensions: ['html'
 
 app.get('/api/health', (_req, res) => res.json({ ok: true, title: APP_TITLE }));
 app.get('/api/config', (_req, res) => {
-  res.json({ title: APP_TITLE, prefix: ROOT_PREFIX, publicBaseUrl: PUBLIC_BASE_URL, maxUploadBytes: MAX_UPLOAD_BYTES });
+  res.json({ title: APP_TITLE, prefix: ROOT_PREFIX, publicBaseUrl: PUBLIC_BASE_URL, maxUploadBytes: MAX_UPLOAD_BYTES, demoMode: DEMO_MODE });
 });
 
 app.get('/api/list', async (req, res, next) => {
   try {
     const folder = cleanPrefix(String(req.query.prefix || ''));
+    if (DEMO_MODE) return res.json(demoList(folder));
     const prefix = joinKey(ROOT_PREFIX, folder);
     const delimiter = '/';
     const folders = new Map();
@@ -75,7 +77,9 @@ app.get('/api/list', async (req, res, next) => {
 
 app.get('/api/object-url', async (req, res, next) => {
   try {
-    const key = fullKey(String(req.query.key || ''));
+    const rel = cleanKey(String(req.query.key || ''));
+    if (DEMO_MODE) return res.json({ key: rel, url: publicUrl(rel), signedUrl: demoMediaUrl(rel) });
+    const key = fullKey(rel);
     const signedUrl = await getSignedUrl(s3, new GetObjectCommand({ Bucket: BUCKET, Key: key }), { expiresIn: 900 });
     res.json({ key: stripRoot(key), url: publicUrl(stripRoot(key)), signedUrl });
   } catch (err) { next(err); }
@@ -84,6 +88,11 @@ app.get('/api/object-url', async (req, res, next) => {
 app.get('/api/thumbnail', async (req, res, next) => {
   try {
     const rel = cleanKey(String(req.query.key || ''));
+    if (DEMO_MODE) {
+      res.setHeader('Cache-Control', 'public, max-age=86400');
+      res.type('image/svg+xml');
+      return res.send(demoThumbSvg(rel));
+    }
     const key = fullKey(rel);
     const kind = mediaKind(rel);
     const cachePath = await thumbnailPath(rel, kind);
@@ -100,6 +109,19 @@ app.get('/api/thumbnail', async (req, res, next) => {
 });
 
 app.post('/api/upload', (req, res, next) => {
+  if (DEMO_MODE) {
+    const bb = Busboy({ headers: req.headers, limits: { fileSize: MAX_UPLOAD_BYTES, files: 200 } });
+    const uploaded = [];
+    bb.on('file', (_field, file, info) => {
+      const filename = safeName(info.filename || 'upload.bin');
+      const rel = cleanKey(joinKey(String(req.query.prefix || ''), filename));
+      uploaded.push({ name: filename, key: rel, url: publicUrl(rel), markdown: obsidianMarkdown(rel) });
+      file.resume();
+    });
+    bb.on('error', next);
+    bb.on('close', () => res.json({ uploaded, errors: [], demoMode: true }));
+    return req.pipe(bb);
+  }
   const folder = cleanPrefix(String(req.query.prefix || ''));
   const bb = Busboy({ headers: req.headers, limits: { fileSize: MAX_UPLOAD_BYTES, files: 200 } });
   const uploads = [];
@@ -135,6 +157,7 @@ app.delete('/api/object', async (req, res, next) => {
   try {
     const rel = cleanKey(String(req.body.key || ''));
     if (!rel) return res.status(400).json({ error: 'Missing key' });
+    if (DEMO_MODE) return res.json({ ok: true, key: rel, demoMode: true });
     await s3.send(new DeleteObjectCommand({ Bucket: BUCKET, Key: fullKey(rel) }));
     await deleteThumbs(rel);
     res.json({ ok: true, key: rel });
@@ -199,4 +222,40 @@ async function deleteThumbs(rel) {
     const p = await thumbnailPath(rel, kind);
     await fs.rm(p, { force: true });
   }
+}
+
+function demoList(prefix) {
+  const samples = [
+    { key: 'lux-living-meta/ret-meta-v5-strapi-gallery/RET-META-01_ShortlistWaiting_v5_strapi_4x5.png', size: 1849200, kind: 'image' },
+    { key: 'lux-living-meta/ret-meta-v5-strapi-gallery/RET-META-02_Carousel_Checks_01.png', size: 2110300, kind: 'image' },
+    { key: 'lux-living-meta/video/downsizer-quiz-walkthrough.mp4', size: 85420000, kind: 'video' },
+    { key: 'stackfast/promo/stackfast-cold-email-promo-cut.mp4', size: 183420000, kind: 'video' },
+    { key: 'clarity-diamonds/blind-test/hero-still.webp', size: 942000, kind: 'image' },
+  ];
+  const folders = new Map();
+  const files = [];
+  const p = cleanPrefix(prefix);
+  for (const sample of samples) {
+    if (p && !sample.key.startsWith(`${p}/`)) continue;
+    const rest = p ? sample.key.slice(p.length + 1) : sample.key;
+    const parts = rest.split('/');
+    if (parts.length > 1) {
+      const folderPrefix = joinKey(p, parts[0]);
+      folders.set(folderPrefix, { type: 'folder', key: folderPrefix, name: parts[0], prefix: folderPrefix });
+    } else {
+      files.push({ type: 'file', kind: sample.kind, key: sample.key, name: basename(sample.key), size: sample.size, modified: new Date().toISOString(), contentType: mime.lookup(sample.key) || '', url: publicUrl(sample.key), markdown: obsidianMarkdown(sample.key), thumbnail: `/api/thumbnail?key=${encodeURIComponent(sample.key)}` });
+    }
+  }
+  return { prefix: p, breadcrumbs: breadcrumbs(p), folders: [...folders.values()].sort(byName), files: files.sort(byName) };
+}
+function demoMediaUrl(rel) {
+  if (mediaKind(rel) === 'video') return 'https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4';
+  return `/api/thumbnail?key=${encodeURIComponent(rel)}`;
+}
+function demoThumbSvg(rel) {
+  const kind = mediaKind(rel);
+  const name = basename(rel).replace(/[&<>]/g, '');
+  const hue = Number.parseInt(crypto.createHash('sha1').update(rel).digest('hex').slice(0, 2), 16);
+  const label = kind === 'video' ? '▶ VIDEO' : 'IMAGE';
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="800" height="520" viewBox="0 0 800 520"><defs><linearGradient id="g" x1="0" x2="1" y1="0" y2="1"><stop stop-color="hsl(${hue},70%,34%)"/><stop offset="1" stop-color="hsl(${(hue+70)%360},80%,16%)"/></linearGradient></defs><rect width="800" height="520" fill="url(#g)"/><circle cx="650" cy="80" r="180" fill="rgba(255,255,255,.12)"/><text x="42" y="70" fill="rgba(255,255,255,.72)" font-family="Inter,Arial" font-size="26" font-weight="800" letter-spacing="4">${label}</text><text x="42" y="430" fill="white" font-family="Inter,Arial" font-size="42" font-weight="900">${name.slice(0,34)}</text></svg>`;
 }
