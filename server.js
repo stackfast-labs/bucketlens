@@ -9,7 +9,7 @@ import express from 'express';
 import Busboy from 'busboy';
 import mime from 'mime-types';
 import sharp from 'sharp';
-import { S3Client, ListObjectsV2Command, DeleteObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3';
+import { S3Client, ListObjectsV2Command, DeleteObjectCommand, GetObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3';
 import { Upload } from '@aws-sdk/lib-storage';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 
@@ -108,6 +108,20 @@ app.get('/api/thumbnail', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+
+app.post('/api/folder', async (req, res, next) => {
+  try {
+    const parent = cleanPrefix(String(req.body?.prefix || ''));
+    const name = cleanFolderName(String(req.body?.name || ''));
+    if (!name) return res.status(400).json({ error: 'Missing folder name' });
+    const rel = joinKey(parent, name);
+    const key = `${fullKey(rel)}/`;
+    if (DEMO_MODE) return res.json({ ok: true, key: `${rel}/`, prefix: rel, demoMode: true });
+    await s3.send(new PutObjectCommand({ Bucket: BUCKET, Key: key, Body: '', ContentType: 'application/x-directory' }));
+    res.json({ ok: true, key: `${rel}/`, prefix: rel });
+  } catch (err) { next(err); }
+});
+
 app.post('/api/upload', (req, res, next) => {
   if (DEMO_MODE) {
     const bb = Busboy({ headers: req.headers, limits: { fileSize: MAX_UPLOAD_BYTES, files: 200 } });
@@ -158,8 +172,9 @@ app.delete('/api/object', async (req, res, next) => {
     const rel = cleanKey(String(req.body.key || ''));
     if (!rel) return res.status(400).json({ error: 'Missing key' });
     if (DEMO_MODE) return res.json({ ok: true, key: rel, demoMode: true });
-    await s3.send(new DeleteObjectCommand({ Bucket: BUCKET, Key: fullKey(rel) }));
-    await deleteThumbs(rel);
+    const key = rel.endsWith('/') ? `${fullKey(rel.replace(/\/+$/g, ''))}/` : fullKey(rel);
+    await s3.send(new DeleteObjectCommand({ Bucket: BUCKET, Key: key }));
+    if (!rel.endsWith('/')) await deleteThumbs(rel);
     res.json({ ok: true, key: rel });
   } catch (err) { next(err); }
 });
@@ -174,6 +189,7 @@ app.listen(PORT, () => console.log(`${APP_TITLE} listening on :${PORT}`));
 function required(name) { const v = process.env[name]; if (!v || v === '[REDACTED]') throw new Error(`Missing ${name}`); return v; }
 function cleanPrefix(s) { return String(s || '').replace(/^\/+|\/+$/g, '').replace(/\.\./g, '').trim(); }
 function cleanKey(s) { return String(s || '').replace(/^\/+/, '').replace(/\.\./g, '').trim(); }
+function cleanFolderName(s) { return String(s || '').replace(/[\\/]+/g, '-').replace(/\.\./g, '').trim().replace(/^\.+/, ''); }
 function stripSlash(s) { return String(s || '').replace(/\/+$/g, ''); }
 function joinKey(...parts) { return parts.map(cleanPrefix).filter(Boolean).join('/'); }
 function fullKey(rel) { return joinKey(ROOT_PREFIX, cleanKey(rel)); }
