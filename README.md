@@ -6,6 +6,8 @@ BucketLens is a self-hosted media console built for the simplicity of Cloudflare
 
 Use it to browse bucket folders, drag-drop large media, preview images and videos, generate thumbnails, copy public URLs or Markdown embeds, and manage assets from a polished web UI, CLI, or MCP server.
 
+BucketLens is also a practical media management layer for AI agent stacks. Agents such as **Hermes** or **OpenClaw** can use the CLI or MCP server to upload generated images/videos, organize outputs into bucket prefixes, retrieve shareable URLs, and produce Markdown embeds for notes, reports, websites, or campaign docs without giving every workflow a bespoke asset pipeline.
+
 ## Features
 
 - Folder/prefix browsing for S3-compatible buckets
@@ -98,6 +100,8 @@ bucketlens mcp
 ```
 
 ## MCP
+
+BucketLens can be used by AI agents and automation frameworks as a shared media layer. For example, Hermes or OpenClaw can generate media locally, upload it through BucketLens, then copy back a stable public URL or Markdown embed for downstream publishing.
 
 Run the stdio MCP server:
 
