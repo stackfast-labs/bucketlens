@@ -1,0 +1,13 @@
+name: Bug report
+description: Report a BucketLens bug
+body:
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Reproduction steps
