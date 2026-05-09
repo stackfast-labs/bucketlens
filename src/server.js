@@ -86,7 +86,9 @@ export function createServer(options = {}) {
   });
   app.use((err, _req, res, _next) => {
     console.error(err.message || err);
-    res.status(500).json({ error: err.message || 'Internal error' });
+    const message = err.message || 'Internal error';
+    const status = /disabled/i.test(message) ? 403 : /missing|required|invalid/i.test(message) ? 400 : 500;
+    res.status(status).json({ error: message });
   });
   return { app, config, s3 };
 }
